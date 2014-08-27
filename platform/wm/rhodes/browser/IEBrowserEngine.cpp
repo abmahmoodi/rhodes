@@ -149,10 +149,13 @@ LRESULT CIEBrowserEngine::CreateEngine()
 
 BOOL CIEBrowserEngine::Navigate(LPCTSTR tcURL, int iTabID)
 {
+    //setting the navigation timeout to default value
+    setNavigationTimeout(45000);
     //  On Windows Mobile devices it has been observed that attempting to 
     //  navigate to a Javascript function before the page is fully loaded can 
     //  crash PocketBrowser (specifically when using Reload).  This condition
     //  prevents that behaviour.
+    
     if (!m_bLoadingComplete && (wcsnicmp(tcURL, L"JavaScript:", wcslen(L"JavaScript:")) == 0))
     {
         LOG(TRACE) + "Failed to Navigate, Navigation in Progress\n";
@@ -544,6 +547,9 @@ LRESULT CIEBrowserEngine::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 					mbstowcs(tcTarget, (LPSTR)pnmHTML->szTarget, MAX_URL);
 				if (tcTarget)
 					mobileTab->InvokeEngineEventLoad(tcTarget, EEID_NAVIGATECOMPLETE);
+				if(mobileTab->m_hNavigated!=NULL)
+					SetEvent(mobileTab->m_hNavigated);
+
 				break;
 			case NM_PIE_KEYSTATE:
 			case NM_PIE_ALPHAKEYSTATE:
@@ -561,30 +567,50 @@ LRESULT CIEBrowserEngine::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 
 DWORD WINAPI CIEBrowserEngine::NavigationTimeoutThread( LPVOID lpParameter )
 {
-	CIEBrowserEngine* pIEEng = reinterpret_cast<CIEBrowserEngine*>(lpParameter);
-
+    CIEBrowserEngine* pIEEng = reinterpret_cast<CIEBrowserEngine*>(lpParameter);
+    DWORD dwWaitResult;
     if (pIEEng->m_dwNavigationTimeout != 0)
     {
         LOG(TRACE) + "Mobile NavThread Started\n";
 
 	    if(pIEEng->m_hNavigated==NULL)
 		    pIEEng->m_hNavigated = CreateEvent(NULL, TRUE, FALSE, L"PB_IEENGINE_NAVIGATION_IN_PROGRESS");
+		dwWaitResult = WaitForSingleObject(pIEEng->m_hNavigated, pIEEng->m_dwNavigationTimeout);
 
-	    if(WaitForSingleObject(pIEEng->m_hNavigated, pIEEng->m_dwNavigationTimeout) != WAIT_OBJECT_0)
-	    {
-		    //no point in doing anything as there is no event handler
-		    pIEEng->StopOnTab(0);
-		    CloseHandle(pIEEng->m_hNavigated);
-		    pIEEng->m_hNavigated = NULL;
+		switch (dwWaitResult) 
+		{
+			// Event object was signaled
+			case WAIT_OBJECT_0: 
+				//
+				// TODO: Read from the shared buffer
+				//
+				LOG(INFO) + "NavigationTimeoutThread:Event object was signaled\n";
+				break; 
+			case WAIT_TIMEOUT: 
+				//
+				// TODO: Read from the shared buffer
+				//
+				LOG(INFO) + "NavigationTimeoutThread:timeout\n";
+				
+					
+				pIEEng->StopOnTab(0);
+				SendMessage(pIEEng->m_parentHWND, WM_BROWSER_ONNAVIGATIONTIMEOUT, 
+					(WPARAM)pIEEng->m_tabID, (LPARAM)pIEEng->m_tcNavigatedURL);
 
-            SendMessage(pIEEng->m_parentHWND, WM_BROWSER_ONNAVIGATIONTIMEOUT, 
-                (WPARAM)pIEEng->m_tabID, (LPARAM)pIEEng->m_tcNavigatedURL);
-	    }
+				break; 
+
+			// An error occurred
+			default: 
+				LOG(INFO) + "Wait error  GetLastError()=\n"+ GetLastError();
+				return 0; 
+		}
+
+
+
+		CloseHandle(pIEEng->m_hNavigated);
+		pIEEng->m_hNavigated = NULL;
 
 	    LOG(TRACE) + "NavThread Ended\n";
-    }
-
-	return 0;
 }
 
 BOOL CIEBrowserEngine::ZoomTextOnTab(int nZoom, UINT iTab)
