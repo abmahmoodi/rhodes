@@ -611,6 +611,9 @@ DWORD WINAPI CIEBrowserEngine::NavigationTimeoutThread( LPVOID lpParameter )
 		pIEEng->m_hNavigated = NULL;
 
 	    LOG(TRACE) + "NavThread Ended\n";
+    }
+
+	return 0;
 }
 
 BOOL CIEBrowserEngine::ZoomTextOnTab(int nZoom, UINT iTab)
